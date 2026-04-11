@@ -320,4 +320,16 @@ impl StaticSoundHandle {
 	pub fn seek_by(&mut self, amount: f64) {
 		self.command_writers.seek_by.write(amount)
 	}
+
+	/// Sets a callback that will be called when the sound stops playing.
+	///
+	/// The callback is called from the audio thread, so it should not
+	/// block or perform heavy work. Use it to send a message to your
+	/// main thread instead.
+	///
+	/// Only one callback can be active at a time. Setting a new callback
+	/// replaces the previous one.
+	pub fn on_stopped(&self, callback: impl FnOnce() + Send + 'static) {
+		self.shared.on_stopped(callback);
+	}
 }

@@ -4,7 +4,7 @@ pub(crate) mod decode_scheduler;
 mod test;
 
 use std::sync::{
-	Arc,
+	Arc, Mutex,
 	atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
 };
 
@@ -22,12 +22,23 @@ use super::{CommandReaders, StreamingSoundSettings};
 
 use self::decode_scheduler::DecodeScheduler;
 
-#[derive(Debug)]
 pub(crate) struct Shared {
 	state: AtomicU8,
 	position: AtomicU64,
 	reached_end: AtomicBool,
 	encountered_error: AtomicBool,
+	stopped_callback: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+}
+
+impl std::fmt::Debug for Shared {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("Shared")
+			.field("state", &self.state)
+			.field("position", &self.position)
+			.field("reached_end", &self.reached_end)
+			.field("encountered_error", &self.encountered_error)
+			.finish()
+	}
 }
 
 impl Shared {
@@ -38,6 +49,7 @@ impl Shared {
 			state: AtomicU8::new(PlaybackState::Playing as u8),
 			reached_end: AtomicBool::new(false),
 			encountered_error: AtomicBool::new(false),
+			stopped_callback: Mutex::new(None),
 		}
 	}
 
@@ -72,6 +84,24 @@ impl Shared {
 	#[must_use]
 	pub fn encountered_error(&self) -> bool {
 		self.encountered_error.load(Ordering::SeqCst)
+	}
+
+	pub fn on_stopped(&self, callback: impl FnOnce() + Send + 'static) {
+		let mut guard = self.stopped_callback.lock().expect("stopped callback mutex poisoned");
+		if self.state() == PlaybackState::Stopped {
+			drop(guard);
+			callback();
+		} else {
+			*guard = Some(Box::new(callback));
+		}
+	}
+
+	pub(crate) fn fire_stopped_callback(&self) {
+		if let Ok(mut guard) = self.stopped_callback.try_lock() {
+			if let Some(cb) = guard.take() {
+				cb();
+			}
+		}
 	}
 }
 
@@ -120,8 +150,11 @@ impl StreamingSound {
 	}
 
 	fn update_shared_playback_state(&mut self) {
-		self.shared
-			.set_state(self.playback_state_manager.playback_state());
+		let state = self.playback_state_manager.playback_state();
+		self.shared.set_state(state);
+		if state == PlaybackState::Stopped {
+			self.shared.fire_stopped_callback();
+		}
 	}
 
 	fn update_current_frame(&mut self) {

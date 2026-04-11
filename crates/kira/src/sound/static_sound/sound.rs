@@ -4,7 +4,7 @@ mod resampler;
 mod test;
 
 use std::sync::{
-	Arc,
+	Arc, Mutex,
 	atomic::{AtomicU8, AtomicU64, Ordering},
 };
 
@@ -68,6 +68,7 @@ impl StaticSound {
 			shared: Arc::new(Shared {
 				state: AtomicU8::new(PlaybackState::Playing as u8),
 				position: AtomicU64::new(position.to_bits()),
+				stopped_callback: Mutex::new(None),
 			}),
 		};
 		// fill the resample buffer with 3 samples so playback can
@@ -83,8 +84,11 @@ impl StaticSound {
 	}
 
 	fn update_shared_playback_state(&mut self) {
-		self.shared
-			.set_state(self.playback_state_manager.playback_state());
+		let state = self.playback_state_manager.playback_state();
+		self.shared.set_state(state);
+		if state == PlaybackState::Stopped {
+			self.shared.fire_stopped_callback();
+		}
 	}
 
 	fn pause(&mut self, fade_out_tween: Tween) {
@@ -246,10 +250,19 @@ impl Sound for StaticSound {
 	}
 }
 
-#[derive(Debug)]
 pub(super) struct Shared {
 	state: AtomicU8,
 	position: AtomicU64,
+	stopped_callback: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+}
+
+impl std::fmt::Debug for Shared {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("Shared")
+			.field("state", &self.state)
+			.field("position", &self.position)
+			.finish()
+	}
 }
 
 impl Shared {
@@ -272,5 +285,23 @@ impl Shared {
 
 	pub fn position(&self) -> f64 {
 		f64::from_bits(self.position.load(Ordering::SeqCst))
+	}
+
+	pub fn on_stopped(&self, callback: impl FnOnce() + Send + 'static) {
+		let mut guard = self.stopped_callback.lock().expect("stopped callback mutex poisoned");
+		if self.state() == PlaybackState::Stopped {
+			drop(guard);
+			callback();
+		} else {
+			*guard = Some(Box::new(callback));
+		}
+	}
+
+	pub(super) fn fire_stopped_callback(&self) {
+		if let Ok(mut guard) = self.stopped_callback.try_lock() {
+			if let Some(cb) = guard.take() {
+				cb();
+			}
+		}
 	}
 }
