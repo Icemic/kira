@@ -12,7 +12,13 @@ fn main() -> Result<(), Box<dyn Error>> {
 	println!("Press enter to play a sound");
 	loop {
 		wait_for_enter_press()?;
-		manager.play(sound_data.clone())?;
+		let handle = manager.play(sound_data.clone())?;
+		let (tx, rx) = std::sync::mpsc::channel();
+		handle.on_stopped(move || {
+			let _ = tx.send(());
+		});
+		rx.recv().unwrap();
+		println!("Sound stopped. Press enter to play it again.");
 	}
 }
 
