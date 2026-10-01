@@ -1,3 +1,17 @@
+# v0.12.5 - September 26, 2026
+
+- Fix typo in docs (thanks @ChangeCaps!)
+- Update rtrb to v0.4.0
+
+# v0.12.4 - August 27, 2026
+
+- Allow creating `StaticSoundData` from non-`'static` sources (thanks @a1phyr!)
+
+# v0.12.3 - August 9, 2026
+
+- When seeking a streaming sound while paused, don't play audio from the previous
+position after resuming (thanks @nnmarcoo!)
+
 # v0.12.2 - July 16, 2026
 
 - Update to symphonia 0.6 (thanks @Eagisa!)
